@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radio Calico - Crystal Clear Audio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&family=Open+Sans:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="nav-bar">
+        <img src="RadioCalicoLogoTM.png" alt="Radio Calico" class="logo">
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero-section">
+        <h1>Crystal Clear Audio</h1>
+        <p class="subtitle">Experience 24-bit / 48 kHz lossless streaming with no ads, no data collection, no subscriptions.</p>
+        <button class="listen-btn" onclick="document.querySelector('.main-content').scrollIntoView({behavior: 'smooth'})">Listen Now</button>
+    </section>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <h2>Live Radio Player</h2>
+
+        <div class="player-container">
+            <audio id="audioPlayer" class="audio-player" controls preload="none"></audio>
+
+            <div class="controls">
+                <button id="playBtn" class="btn btn-primary">▶️ Play</button>
+                <button id="stopBtn" class="btn btn-secondary">⏹️ Stop</button>
+            </div>
+
+            <div class="volume-control">
+                <span style="font-size: 1.25rem;">🔊</span>
+                <input type="range" id="volumeSlider" class="volume-slider" min="0" max="1" step="0.1" value="0.8">
+                <span id="volumeValue" style="font-weight: 500; min-width: 40px;">80%</span>
+            </div>
+
+            <div id="status" class="status disconnected">Disconnected</div>
+        </div>
+
+        <div class="now-playing">
+            <h3>🎵 Now Playing</h3>
+            <div class="track-info">
+                <div class="album-art" id="albumArt">🎶</div>
+                <div class="track-details">
+                    <div class="track-title" id="trackTitle">No track info available</div>
+                    <div class="track-artist" id="trackArtist">Unknown Artist</div>
+                    <div class="rating-controls">
+                        <button class="rating-btn thumbs-up" id="thumbsUpBtn" title="Thumbs Up">
+                            👍
+                        </button>
+                        <button class="rating-btn thumbs-down" id="thumbsDownBtn" title="Thumbs Down">
+                            👎
+                        </button>
+                        <div class="rating-stats">
+                            <div class="rating-count">
+                                <span>👍</span>
+                                <span id="thumbsUpCount">0</span>
+                            </div>
+                            <div class="rating-count">
+                                <span>👎</span>
+                                <span id="thumbsDownCount">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="recently-played">
+            <h3>📋 Recently Played</h3>
+            <div id="recentTracks">
+                <div class="recent-track">
+                    <div class="track-time">--:--</div>
+                    <div class="track-info-small">
+                        <div class="track-title-small">No recent tracks</div>
+                        <div class="track-artist-small">Start playing to see history</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stream-info">
+            <strong>Stream Source:</strong><br>
+            <small>https://d3d4yli4hf5bmh.cloudfront.net/hls/live.m3u8</small>
+        </div>
+    </main>
+
+    <script>
+        const audioPlayer = document.getElementById('audioPlayer');
+        const playBtn = document.getElementById('playBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const volumeSlider = document.getElementById('volumeSlider');
+        const volumeValue = document.getElementById('volumeValue');
+        const status = document.getElementById('status');
+        const streamUrl = 'https://d3d4yli4hf5bmh.cloudfront.net/hls/live.m3u8';
+
+        let hls = null;
+        let isPlaying = false;
+        let recentTracks = [];
+        let metadataInterval = null;
+        let currentTrack = null;
+
+        function updateStatus(state, message) {
+            status.className = `status ${state}`;
+            status.textContent = message;
+        }
+
+        function initHLS() {
+            if (Hls.isSupported()) {
+                hls = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    backBufferLength: 90
+                });
+
+                hls.loadSource(streamUrl);
+                hls.attachMedia(audioPlayer);
+
+                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                    updateStatus('connected', 'Ready to play');
+                });
+
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    console.error('HLS Error:', data);
+                    if (data.fatal) {
+                        switch(data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                updateStatus('disconnected', 'Network error - retrying...');
+                                hls.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                updateStatus('disconnected', 'Media error - recovering...');
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                updateStatus('disconnected', 'Fatal error - please refresh');
+                                hls.destroy();
+                                break;
+                        }
+                    }
+                });
+
+                hls.on(Hls.Events.FRAG_LOADED, function() {
+                    if (isPlaying) {
+                        updateStatus('connected', '🎵 Playing live stream');
+                    }
+                });
+
+            } else if (audioPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                audioPlayer.src = streamUrl;
+                updateStatus('connected', 'Ready to play (native HLS)');
+            } else {
+                updateStatus('disconnected', 'HLS not supported in this browser');
+            }
+        }
+
+        playBtn.addEventListener('click', function() {
+            if (!isPlaying) {
+                updateStatus('connecting', 'Connecting...');
+                audioPlayer.play().then(() => {
+                    isPlaying = true;
+                    playBtn.textContent = '⏸️ Pause';
+                    playBtn.className = 'btn btn-secondary';
+                    updateStatus('connected', '🎵 Playing live stream');
+                    startMetadataPolling();
+                }).catch(error => {
+                    console.error('Play failed:', error);
+                    updateStatus('disconnected', 'Failed to start playback');
+                });
+            } else {
+                audioPlayer.pause();
+                isPlaying = false;
+                playBtn.textContent = '▶️ Play';
+                playBtn.className = 'btn btn-primary';
+                updateStatus('connected', 'Paused');
+                stopMetadataPolling();
+            }
+        });
+
+        stopBtn.addEventListener('click', function() {
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+            isPlaying = false;
+            playBtn.textContent = '▶️ Play';
+            playBtn.className = 'btn btn-primary';
+            updateStatus('connected', 'Stopped');
+            stopMetadataPolling();
+        });
+
+        volumeSlider.addEventListener('input', function() {
+            audioPlayer.volume = this.value;
+            volumeValue.textContent = Math.round(this.value * 100) + '%';
+        });
+
+        // Initialize volume
+        audioPlayer.volume = volumeSlider.value;
+        volumeValue.textContent = Math.round(volumeSlider.value * 100) + '%';
+
+        // Rating button event listeners
+        document.getElementById('thumbsUpBtn').addEventListener('click', () => {
+            rateSong(1);
+        });
+
+        document.getElementById('thumbsDownBtn').addEventListener('click', () => {
+            rateSong(-1);
+        });
+
+        // Metadata functions
+        async function fetchMetadata() {
+            try {
+                const response = await fetch('/api/metadata');
+                if (response.ok) {
+                    const data = await response.json();
+                    updateNowPlaying(data.current);
+                    updateRecentlyPlayed(data.recent);
+                }
+            } catch (error) {
+                console.log('Metadata fetch failed:', error);
+            }
+        }
+
+        function updateNowPlaying(track) {
+            const titleEl = document.getElementById('trackTitle');
+            const artistEl = document.getElementById('trackArtist');
+            const albumArt = document.getElementById('albumArt');
+
+            if (track && track.title && track.artist) {
+                currentTrack = track;
+                titleEl.textContent = track.title;
+                artistEl.textContent = track.artist;
+
+                // Update album art
+                if (track.albumArt && track.albumArt.startsWith('http')) {
+                    albumArt.innerHTML = `<img src="${track.albumArt}" alt="Album Art" onerror="this.parentElement.innerHTML='🎵'">`;
+                } else {
+                    albumArt.innerHTML = track.albumArt || '🎵';
+                }
+
+                // Update rating display
+                updateRatingDisplay(track.ratings);
+            } else {
+                currentTrack = null;
+                titleEl.textContent = 'Live Stream';
+                artistEl.textContent = 'Radio Calico';
+                albumArt.innerHTML = '📻';
+                updateRatingDisplay(null);
+            }
+        }
+
+        function updateRatingDisplay(ratings) {
+            const thumbsUpBtn = document.getElementById('thumbsUpBtn');
+            const thumbsDownBtn = document.getElementById('thumbsDownBtn');
+            const thumbsUpCount = document.getElementById('thumbsUpCount');
+            const thumbsDownCount = document.getElementById('thumbsDownCount');
+
+            if (ratings) {
+                thumbsUpCount.textContent = ratings.thumbsUp;
+                thumbsDownCount.textContent = ratings.thumbsDown;
+
+                // Update button states based on user's vote
+                thumbsUpBtn.classList.toggle('active', ratings.userVote === 1);
+                thumbsDownBtn.classList.toggle('active', ratings.userVote === -1);
+            } else {
+                thumbsUpCount.textContent = '0';
+                thumbsDownCount.textContent = '0';
+                thumbsUpBtn.classList.remove('active');
+                thumbsDownBtn.classList.remove('active');
+            }
+        }
+
+        async function rateSong(rating) {
+            if (!currentTrack || !currentTrack.songId) {
+                console.error('No current track to rate');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/rate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        songId: currentTrack.songId,
+                        title: currentTrack.title,
+                        artist: currentTrack.artist,
+                        rating: rating
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    updateRatingDisplay(data.ratings);
+                } else {
+                    console.error('Rating failed:', data.error);
+                }
+            } catch (error) {
+                console.error('Rating request failed:', error);
+            }
+        }
+
+        function updateRecentlyPlayed(tracks) {
+            const container = document.getElementById('recentTracks');
+
+            if (!tracks || tracks.length === 0) {
+                container.innerHTML = `
+                    <div class="recent-track">
+                        <div class="track-time">--:--</div>
+                        <div class="track-info-small">
+                            <div class="track-title-small">No recent tracks</div>
+                            <div class="track-artist-small">Start playing to see history</div>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = tracks.slice(0, 5).map(track => {
+                const time = track.playedAt ? new Date(track.playedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '--:--';
+                return `
+                    <div class="recent-track">
+                        <div class="track-time">${time}</div>
+                        <div class="track-info-small">
+                            <div class="track-title-small">${track.title || 'Unknown Track'}</div>
+                            <div class="track-artist-small">${track.artist || 'Unknown Artist'}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function startMetadataPolling() {
+            if (metadataInterval) clearInterval(metadataInterval);
+            fetchMetadata(); // Initial fetch
+            metadataInterval = setInterval(fetchMetadata, 10000); // Poll every 10 seconds
+        }
+
+        function stopMetadataPolling() {
+            if (metadataInterval) {
+                clearInterval(metadataInterval);
+                metadataInterval = null;
+            }
+        }
+
+        // Event listeners for audio player
+        audioPlayer.addEventListener('loadstart', function() {
+            updateStatus('connecting', 'Loading stream...');
+        });
+
+        audioPlayer.addEventListener('canplay', function() {
+            updateStatus('connected', 'Ready to play');
+        });
+
+        audioPlayer.addEventListener('playing', function() {
+            updateStatus('connected', '🎵 Playing live stream');
+        });
+
+        audioPlayer.addEventListener('waiting', function() {
+            updateStatus('connecting', 'Buffering...');
+        });
+
+        audioPlayer.addEventListener('error', function() {
+            updateStatus('disconnected', 'Playback error occurred');
+            isPlaying = false;
+            playBtn.textContent = '▶️ Play';
+            playBtn.className = 'btn btn-primary';
+        });
+
+        // Initialize HLS when page loads
+        updateStatus('connecting', 'Initializing...');
+        initHLS();
+    </script>
+</body>
+</html>
